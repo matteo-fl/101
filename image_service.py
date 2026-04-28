@@ -1,41 +1,86 @@
 import os
+import time
 import requests
 from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageFont
 
 load_dotenv()
-IMAGE_API_URL = os.getenv("IMAGE_API_URL", "")
-IMAGE_API_KEY = os.getenv("IMAGE_API_KEY", "")
 
-def generate_image(prompt: str, save_path: str) -> str | None:
-    # 🔹 РАСКОММЕНТИРУЙТЕ ДЛЯ РЕАЛЬНОГО API (Kandinsky, DALL-E и др.)
-    """
-    headers = {"Authorization": f"Bearer {IMAGE_API_KEY}"}
-    resp = requests.post(IMAGE_API_URL, headers=headers, json={"prompt": prompt})
-    resp.raise_for_status()
-    img_url = resp.json()["data"][0]["url"]
-    with open(save_path, "wb") as f:
-        f.write(requests.get(img_url).content)
-    return save_path
-    """
+API_TOKEN = os.getenv("RT_API_KEY")
+SD_URL = "https://ai.rt.ru/api/1.0/sd/img"
+DOWNLOAD_URL = "https://ai.rt.ru/api/1.0/download"
 
-    # 🟡 НАДЁЖНАЯ MVP-ЗАГЛУШКА (генерирует картинку локально)
+def generate_image(prompt: str, save_path: str) -> str:
+    headers = {
+        "Authorization": f"Bearer {API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "uuid": "00000000-0000-0000-0000-000000000000",
+        "sdImage": {
+            "request": prompt,
+            "seed": 123456789,
+            "translate": True
+        }
+    }
+
     try:
-        img = Image.new('RGB', (1024, 768), color=(0, 82, 204))
-        draw = ImageDraw.Draw(img)
+        print(f"🎨 Генерация: {prompt[:60]}...")
         
-        # Добавляем белый прямоугольник-подложку
-        draw.rectangle([100, 200, 924, 568], fill=(255, 255, 255))
+        # Шаг 1: Запрос на генерацию
+        response = requests.post(SD_URL, headers=headers, json=payload, timeout=60)
         
-        # Текст по центру
-        font = ImageFont.load_default(size=32)
-        text = prompt[:40] + "..." if len(prompt) > 40 else prompt
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_w = bbox[2] - bbox[0]
-        draw.text(((1024 - text_w) / 2, 350), text, fill=(0, 82, 204), font=font)
+        if response.status_code != 200:
+            print(f"❌ SD Error: {response.status_code}")
+            return None
         
-        img.save(save_path, "PNG")
-        return save_path
+        data = response.json()
+        print(f"📦 Ответ API: {data}")
+        
+        # 🔑 КЛЮЧЕВОЙ МОМЕНТ: извлекаем INTEGER id из message, не uuid!
+        # Формат ответа: [{"message": {"id": 12345, ...}, "uuid": "..."}]
+        if isinstance(data, list) and len(data) > 0:
+            message = data[0].get("message", {})
+            task_id = message.get("id")  # <-- INTEGER, не uuid!
+        elif isinstance(data, dict):
+            message = data.get("message", {})
+            task_id = message.get("id")
+        else:
+            print("❌ Неверный формат ответа")
+            return None
+        
+        if not task_id:
+            print("❌ Не получен id из message")
+            return None
+        
+        print(f"✅ Получен task_id: {task_id} (type: {type(task_id).__name__})")
+        
+        # Шаг 2: Ждём генерацию
+        time.sleep(4)
+        
+        # Шаг 3: Скачиваем по INTEGER id
+        # Важно: serviceType=sd (маленькими буквами)
+        download_url = f"{DOWNLOAD_URL}?id={task_id}&serviceType=sd&imageType=png"
+        print(f"📥 Download URL: {download_url}")
+        
+        img_response = requests.get(
+            download_url,
+            headers={"Authorization": f"Bearer {API_TOKEN}"},
+            timeout=60
+        )
+        
+        if img_response.status_code == 200:
+            with open(save_path, "wb") as f:
+                f.write(img_response.content)
+            print(f"✅ Картинка сохранена: {save_path}")
+            return save_path
+        else:
+            print(f"❌ Download error {img_response.status_code}: {img_response.text[:200]}")
+            return None
+        
     except Exception as e:
-        print(f"⚠️ Ошибка генерации картинки: {e}")
+        print(f"❌ Ошибка: {e}")
+        import traceback
+        traceback.print_exc()
         return None
+        
