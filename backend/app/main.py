@@ -1,206 +1,153 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional
 import os
-import uuid
-from datetime import datetime
+import shutil
+from fastapi import FastAPI, File, UploadFile, Form, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.templating import Jinja2Templates
+import pypdf
+from docx import Document
+from dotenv import load_dotenv
+from backend.app.services.llm_service import generate_structure
+from backend.app.services.image_service import generate_image
+from backend.app.services.pptx_generator import generate_presentation
 
-# Import config
-from backend.app.config import config
-from backend.app.models import PresentationRequest, SlideContent, Style, Tone
-from backend.app.services import LLMService, ImageService, PPTXGenerator
+load_dotenv()
 
-# Validate configuration
-config.validate()
+app = FastAPI(title="AI PPTX Generator")
+os.makedirs("uploads", exist_ok=True)
 
-# Initialize app
-app = FastAPI(
-    title="AI Presentation Generator - Rostelecom",
-    description="Automatic presentation generation using Rostelecom AI APIs",
-    version="1.0.0"
-)
-
-# CORS middleware
+# CORS - разрешаем запросы с React
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.CORS_ORIGINS,
+    allow_origins=["http://localhost:5174", "http://localhost:5173", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize services with config
-llm_service = LLMService(
-    api_key=config.API_TOKEN,
-    api_url=config.LLAMA_API_URL
-)
+# Монтируем папку uploads как статическую (для доступа к картинкам)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-image_service = ImageService(
-    api_key=config.API_TOKEN,
-    api_url=config.YANDEX_ART_API_URL
-)
+# Шаблонизатор (если нужен старый HTML)
+templates = Jinja2Templates(directory="templates")
 
-pptx_generator = PPTXGenerator()
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
-# Create directories
-os.makedirs(config.GENERATED_FILES_DIR, exist_ok=True)
-
-# Store session data
-presentations_store = {}
-
+def extract_text(file: UploadFile) -> str:
+    """Извлечение текста из PDF/DOCX"""
+    if file is None or file.filename == "":
+        return ""
+    
+    path = os.path.join("uploads", file.filename)
+    with open(path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    
+    text = ""
+    try:
+        if file.filename.lower().endswith(".pdf"):
+            with open(path, "rb") as f:
+                reader = pypdf.PdfReader(f)
+                text = "\n".join([p.extract_text() or "" for p in reader.pages])
+        elif file.filename.lower().endswith(".docx"):
+            doc = Document(path)
+            text = "\n".join([p.text for p in doc.paragraphs])
+    except Exception as e:
+        print(f"Error extracting text: {e}")
+        return ""
+    
+    return text[:3000]
 
 @app.post("/api/generate")
-async def generate_presentation(
-        prompt: str = Form(...),
-        num_slides: int = Form(10, ge=1, le=20),
-        style: str = Form("corporate"),
-        tone: str = Form("professional"),
-        include_images: bool = Form(True),
-        document: Optional[UploadFile] = File(None)
+async def generate(
+    prompt: str = Form(...),
+    num_slides: int = Form(10),
+    style: str = Form("Современный"),
+    tone: str = Form("Профессиональный"),
+    file: UploadFile = File(None, alias="document")
 ):
-    """Generate presentation using Rostelecom LLM and Image APIs"""
-
-    # Check file size
-    if document and document.size > config.MAX_FILE_SIZE_MB * 1024 * 1024:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large. Max size: {config.MAX_FILE_SIZE_MB}MB"
-        )
-
-    session_id = str(uuid.uuid4())
-
+    """Генерация презентации"""
     try:
-        # Process document if provided
-        document_content = ""
-        if document:
-            content = await document.read()
-            document_content = await llm_service.process_document(content, document.filename)
-
-        # Create request
-        request = PresentationRequest(
-            prompt=prompt,
-            num_slides=num_slides,
-            style=Style(style),
-            tone=Tone(tone),
-            include_images=include_images
-        )
-
-        # Generate structure with LLM
-        slides = await llm_service.generate_presentation_structure(request, document_content)
-
-        # Adjust slide count
-        if len(slides) != num_slides:
-            if len(slides) < num_slides:
-                for i in range(len(slides), num_slides):
-                    slides.append(slides[-1] if slides else SlideContent(
-                        title="Дополнительный слайд",
-                        content="• Содержание\n• Дополнительная информация",
-                        image_prompt="Дополнительная иллюстрация"
-                    ))
-            else:
-                slides = slides[:num_slides]
-
-        # Generate images if requested
-        if include_images:
-            for i, slide in enumerate(slides):
-                if slide.image_prompt:
-                    image_url = await image_service.generate_image(
-                        slide.image_prompt,
-                        aspect=config.DEFAULT_IMAGE_ASPECT
-                    )
-                    slide.image_url = image_url
-                    if i < len(slides) - 1:
-                        import asyncio
-                        await asyncio.sleep(1)
-
-        # Generate PPTX
-        pptx_content = await pptx_generator.create_presentation(
-            slides,
-            style,
-            include_images
-        )
-
-        # Save file
-        file_path = os.path.join(config.GENERATED_FILES_DIR, f"{session_id}.pptx")
-        with open(file_path, "wb") as f:
-            f.write(pptx_content)
-
-        # Store session
-        presentations_store[session_id] = {
-            "file_path": file_path,
-            "slides": slides,
-            "created_at": datetime.now().isoformat()
-        }
-
-        return JSONResponse({
-            "session_id": session_id,
-            "file_url": f"/api/download/{session_id}",
-            "slides": [
-                {
-                    "title": s.title,
-                    "content": s.content[:200],
-                    "has_image": s.image_url is not None
-                }
-                for s in slides
-            ],
-            "message": "Презентация успешно создана!"
-        })
-
+        doc_text = ""
+        if file and file.filename:
+            doc_text = extract_text(file)
+        
+        # Генерируем структуру слайдов
+        try:
+            structure = generate_structure(prompt, doc_text, num_slides, style, tone)
+        except Exception as e:
+            print(f"Error in generate: {e}")
+            return JSONResponse({"error": str(e)}, status_code=500)
+        
+        # Генерируем изображения для каждого слайда
+        for i, slide in enumerate(structure):
+            if slide.get("image_prompt"):
+                generate_image(slide["image_prompt"], f"uploads/img_{i}.png")
+        
+        # Создаем PPTX
+        pptx_path = "uploads/result.pptx"
+        generate_presentation(structure, pptx_path)
+        
+        return JSONResponse({"slides": structure, "message": "Готово!"})
+    
     except Exception as e:
-        print(f"Generation error: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка генерации: {str(e)}")
+        print(f"Error in generate: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.post("/api/upload-image")
+async def upload_image(file: UploadFile = File(...), slide_index: int = Form(...)):
+    """Загрузка пользовательского изображения для слайда"""
+    try:
+        # Сохраняем файл
+        file_path = f"uploads/slide_{slide_index}_custom.png"
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        print(f"✅ Изображение загружено: {file_path}")
+        
+        return JSONResponse({
+            "message": "Изображение загружено",
+            "file_path": file_path
+        })
+    except Exception as e:
+        print(f"❌ Ошибка загрузки: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
-@app.get("/api/download/{session_id}")
-async def download_presentation(session_id: str):
-    """Download generated presentation"""
-    if session_id not in presentations_store:
-        raise HTTPException(status_code=404, detail="Презентация не найдена")
+@app.post("/api/regenerate-image")
+async def regenerate_image(prompt: str = Form(...), slide_index: int = Form(...)):
+    """Перегенерация изображения через AI"""
+    try:
+        file_path = f"uploads/img_{slide_index}.png"
+        
+        # Генерируем новое изображение
+        result = generate_image(prompt, file_path)
+        
+        if result:
+            print(f"✅ Изображение перегенерировано: {file_path}")
+            return JSONResponse({
+                "message": "Изображение сгенерировано",
+                "file_path": file_path
+            })
+        else:
+            return JSONResponse({"error": "Не удалось сгенерировать"}, status_code=500)
+            
+    except Exception as e:
+        print(f"❌ Ошибка генерации: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
-    file_path = presentations_store[session_id]["file_path"]
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Файл не найден")
-
+@app.get("/api/download")
+async def download():
+    """Скачивание готовой презентации"""
+    pptx_path = "uploads/result.pptx"
+    if not os.path.exists(pptx_path):
+        return JSONResponse({"error": "Файл ещё не сгенерирован"}, status_code=404)
+    
     return FileResponse(
-        file_path,
-        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        filename=f"presentation_{session_id}.pptx"
-    )
-
-
-@app.get("/api/config")
-async def get_config_info():
-    """Get configuration info (without sensitive data)"""
-    return {
-        "api_base_url": config.API_BASE_URL,
-        "llama_model": config.LLAMA_MODEL,
-        "max_file_size_mb": config.MAX_FILE_SIZE_MB,
-        "environment": ENV,
-        "available_aspects": config.DEFAULT_IMAGE_ASPECT
-    }
-
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "services": {
-            "llm": "Leopold (Qwen2.5-72B)",
-            "image": "Yandex ART"
-        },
-        "timestamp": datetime.now().isoformat(),
-        "environment": ENV
-    }
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        "app.main:app",
-        host=config.HOST,
-        port=config.PORT,
-        reload=config.RELOAD
+        pptx_path,
+        media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        filename='presentation.pptx'
     )

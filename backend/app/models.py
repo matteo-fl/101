@@ -3,21 +3,21 @@ from typing import Optional, List
 from enum import Enum
 
 class Style(str, Enum):
-    CORPORATE = "corporate"
+    CORPORATE = "корпоративный"
     CREATIVE = "creative"
     MINIMAL = "minimal"
 
 class Tone(str, Enum):
-    PROFESSIONAL = "professional"
-    FRIENDLY = "friendly"
-    ACADEMIC = "academic"
+    PROFESSIONAL = "профессиональный"
+    FRIENDLY = "дружелюбный"
+    ACADEMIC = "академический"
 
 class PresentationRequest(BaseModel):
     prompt: str
-    num_slides: int = 10
-    style: Style = Style.CORPORATE
-    tone: Tone = Tone.PROFESSIONAL
-    include_images: bool = True
+    num_slides: int
+    style: Style
+    tone: Tone
+    include_images: bool
 
 class SlideContent(BaseModel):
     title: str

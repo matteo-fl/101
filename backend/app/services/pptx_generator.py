@@ -1,101 +1,38 @@
 from pptx import Presentation
 from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
-import aiohttp
-import io
-from typing import List
-from backend.app.models import SlideContent
+import os
 
+def generate_presentation(slides_data: list, output_path: str) -> str:
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    PRIMARY = RGBColor(0x00, 0x52, 0xCC)
+    TEXT = RGBColor(0x33, 0x33, 0x33)
 
-class PPTXGenerator:
-    def __init__(self):
-        self.prs = Presentation()
-
-    def apply_style(self, style: str):
-        """Apply different styles to presentation"""
-        if style == "corporate":
-            # Corporate style - blue tones
-            self.title_slide_layout = self.prs.slide_layouts[0]
-            self.content_slide_layout = self.prs.slide_layouts[1]
-        elif style == "creative":
-            # Creative style - colorful
-            self.title_slide_layout = self.prs.slide_layouts[0]
-            self.content_slide_layout = self.prs.slide_layouts[5]
-        else:  # minimal
-            self.title_slide_layout = self.prs.slide_layouts[0]
-            self.content_slide_layout = self.prs.slide_layouts[1]
-
-    async def create_presentation(
-            self,
-            slides: List[SlideContent],
-            style: str,
-            include_images: bool = True
-    ) -> bytes:
-        """Create PPTX file from slides content"""
-
-        self.apply_style(style)
-
-        for i, slide_content in enumerate(slides):
-            if i == 0:
-                # Title slide
-                slide = self.prs.slides.add_slide(self.title_slide_layout)
-                title = slide.shapes.title
-                subtitle = slide.placeholders[1] if len(slide.placeholders) > 1 else None
-
-                title.text = slide_content.title
-                if subtitle:
-                    subtitle.text = slide_content.content[:100]
-            else:
-                # Content slide
-                slide_layout = self.content_slide_layout
-                slide = self.prs.slides.add_slide(slide_layout)
-
-                # Add title
-                if slide.shapes.title:
-                    slide.shapes.title.text = slide_content.title
-
-                # Add content
-                content_shape = None
-                for shape in slide.placeholders:
-                    if shape.placeholder_format.type == 1:  # Body placeholder
-                        content_shape = shape
-                        break
-
-                if content_shape:
-                    text_frame = content_shape.text_frame
-                    text_frame.clear()
-
-                    # Split by newlines for bullet points
-                    for line in slide_content.content.split('\n'):
-                        p = text_frame.add_paragraph()
-                        p.text = line.strip()
-                        p.font.size = Pt(18)
-                        p.space_after = Pt(12)
-
-                # Add image if available and requested
-                if include_images and slide_content.image_url:
-                    await self._add_image_to_slide(slide, slide_content.image_url)
-
-        # Save to bytes
-        output = io.BytesIO()
-        self.prs.save(output)
-        output.seek(0)
-        return output.getvalue()
-
-    async def _add_image_to_slide(self, slide, image_url: str):
-        """Download and add image to slide"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(image_url) as response:
-                    if response.status == 200:
-                        image_data = await response.read()
-                        image_stream = io.BytesIO(image_data)
-
-                        # Add image to top-right corner
-                        left = Inches(7)
-                        top = Inches(1.5)
-                        width = Inches(3)
-                        slide.shapes.add_picture(image_stream, left, top, width=width)
-        except Exception as e:
-            print(f"Failed to add image: {e}")
+    for i, slide in enumerate(slides_data):
+        if i == 0:
+            layout = prs.slide_layouts[0]
+            s = prs.slides.add_slide(layout)
+            s.shapes.title.text = slide["title"]
+            s.placeholders[1].text = slide["content"]
+        else:
+            layout = prs.slide_layouts[5]
+            s = prs.slides.add_slide(layout)
+            tb = s.shapes.add_textbox(Inches(0.8), Inches(0.6), Inches(11), Inches(1))
+            p = tb.text_frame.paragraphs[0]
+            p.font.size, p.font.bold, p.font.color.rgb = Pt(32), True, PRIMARY
+            tb2 = s.shapes.add_textbox(Inches(0.8), Inches(1.8), Inches(7), Inches(5))
+            p2 = tb2.text_frame.paragraphs[0]
+            p2.text = slide["content"]
+            p2.font.size, p2.font.color.rgb = Pt(20), TEXT
+            tb2.text_frame.word_wrap = True
+                        # Картинка (безопасная вставка)
+            img_path = f"uploads/img_{i}.png"
+            if os.path.exists(img_path):
+                try:
+                    s.shapes.add_picture(img_path, Inches(8.5), Inches(1.5), width=Inches(4))
+                except Exception as e:
+                    print(f"️ Пропуск битой картинки для слайда {i+1}: {e}")
+    prs.save(output_path)
+    return output_path
