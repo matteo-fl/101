@@ -3,14 +3,14 @@ from typing import Optional, List
 from enum import Enum
 
 class Style(str, Enum):
-    CORPORATE = "корпоративный"
+    CORPORATE = "corporate"
     CREATIVE = "creative"
     MINIMAL = "minimal"
 
 class Tone(str, Enum):
-    PROFESSIONAL = "профессиональный"
-    FRIENDLY = "дружелюбный"
-    ACADEMIC = "академический"
+    PROFESSIONAL = "professional"
+    FRIENDLY = "friendly"
+    ACADEMIC = "academic"
 
 class PresentationRequest(BaseModel):
     prompt: str

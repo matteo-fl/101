@@ -22,12 +22,13 @@ const AppContent = () => {
     try {
       const response = await generatePresentation(request);
       setSlides(response.slides);
-      setSessionId(response.session_id);
+      setSessionId(response.sessionId);
 
       // 👈 Переход на страницу редактора
       navigate('/editor', {
-        state: { slides: response.slides, sessionId: response.session_id }
+        state: { slides: response.slides, sessionId: response.sessionId }
       });
+      setLoading(false);
     } catch (err) {
       console.error('Generation error:', err);
       setError(err.response?.data?.detail || 'Ошибка при генерации презентации');
@@ -56,8 +57,8 @@ const AppContent = () => {
           } />
           <Route path="/editor" element={
             <SlidesPreview
-              slides={slides}
-              sessionId={sessionId}
+              slides={slides !== null ? slides : []}
+              sessionId={sessionId !== null ? sessionId : null}
               onSlidesUpdate={(updatedSlides) => setSlides(updatedSlides)}
             />
           } />

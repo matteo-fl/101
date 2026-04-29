@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import Select from 'react-select';
 import { FaUpload, FaFile, FaTrash, FaImage, FaRegFileAlt } from 'react-icons/fa';
+import { useNavigate } from 'react-router-dom'; // 👈 Добавляем useNavigate
 import styles from './GenerationForm.module.scss';
 
 const styleOptions = [
@@ -17,6 +18,7 @@ const toneOptions = [
 ];
 
 const GenerationForm = ({ onSubmit, loading }) => {
+  const navigate = useNavigate(); // 👈 Хук для навигации
   const [prompt, setPrompt] = useState('');
   const [numSlides, setNumSlides] = useState(10);
   const [selectedStyle, setSelectedStyle] = useState(styleOptions[0]);
@@ -57,6 +59,35 @@ const GenerationForm = ({ onSubmit, loading }) => {
 
   const removeDocument = () => {
     setDocument(null);
+  };
+
+  // 👈 Обработчик для кнопки перехода в редактор
+  const handleNavigateToEditor = () => {
+    // Проверяем, есть ли данные для передачи
+    const testSlides = [
+      {
+        id: 1,
+        title: 'Пример слайда 1',
+        content: 'Это содержимое примерного слайда',
+        image_url: null
+      },
+      {
+        id: 2,
+        title: 'Пример слайда 2',
+        content: 'Вы можете заменить эти данные реальными',
+        image_url: null
+      }
+    ];
+
+    const testSessionId = `test_${Date.now()}`;
+
+    // Переход с тестовыми данными
+    navigate('/editor', {
+      state: {
+        slides: testSlides,
+        sessionId: testSessionId
+      }
+    });
   };
 
   const formatOption = ({ icon, label, description }) => (
@@ -187,6 +218,16 @@ const GenerationForm = ({ onSubmit, loading }) => {
         ) : (
           <span>Создать презентацию</span>
         )}
+      </button>
+
+      {/* 👈 Обновленная кнопка с обработчиком */}
+      <button
+        type="button"
+        className={styles.submitButton}
+        id="oooow"
+        onClick={handleNavigateToEditor}  // 👈 Добавляем onClick
+      >
+        Перейти в редактор
       </button>
     </form>
   );

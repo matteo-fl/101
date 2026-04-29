@@ -1,6 +1,7 @@
 import os
 from random import randint
 import time
+import asyncio
 import requests
 import uuid
 from dotenv import load_dotenv
@@ -16,9 +17,9 @@ def generate_image(prompt: str, save_path: str) -> str | None:
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "application/json"
     }
-    
+
     payload = {
-        "uuid": "00000000-0000-0000-0000-000000000000", #f"{str(uuid.uuid4())}",
+        "uuid": str(uuid.uuid4()),
         "sdImage": {
             "request": prompt,
             "seed": randint(100_000_000, 200_000_000),
