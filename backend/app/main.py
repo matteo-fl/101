@@ -85,6 +85,7 @@ async def generate(
     style: str = Form("corporate"),
     tone: str = Form("professional"),
     include_images: str = Form("true"),
+    template_id: int = Form(1),
     file: UploadFile = File(None, alias="document")
 ):
     """Генерация презентации"""
@@ -94,6 +95,7 @@ async def generate(
         return JSONResponse({"error": "Промпт должен быть минимум 3 символа"}, status_code=400)
 
     num_slides = max(1, min(20, int(num_slides)))  # 1-20 слайдов
+    template_id = max(1, min(3, int(template_id)))  # 1-3 шаблона
     include_images_bool = include_images.lower() == "true"
 
     # Создаём уникальный ID сессии
@@ -123,9 +125,9 @@ async def generate(
                     image_path = os.path.join(session_dir, f"img_{i}.png")
                     generate_image(slide["image_prompt"], image_path)
 
-        # Создаем PPTX в директории сессии
+        # Создаем PPTX в директории сессии с выбранным шаблоном
         pptx_path = os.path.join(session_dir, "result.pptx")
-        generate_presentation(structure, pptx_path)
+        generate_presentation(structure, pptx_path, style_name=style, template_id=template_id)
 
         return JSONResponse({"slides": structure, "message": "Готово!", "sessionId": session_id})
 
