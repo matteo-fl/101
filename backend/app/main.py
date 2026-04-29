@@ -9,9 +9,9 @@ from docx import Document
 from dotenv import load_dotenv
 import uuid
 import re
-from backend.app.services.llm_service import generate_structure
-from backend.app.services.image_service import generate_image
-from backend.app.services.pptx_generator import generate_presentation
+from app.services.llm_service import generate_structure
+from app.services.image_service import generate_image
+from app.services.pptx_generator import generate_presentation
 
 load_dotenv()
 
